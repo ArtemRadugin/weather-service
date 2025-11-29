@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/ArtemRadugin/weather-service/internal/client/http/geocoding"
@@ -8,8 +9,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-co-op/gocron/v2"
+	"github.com/jackc/pgx/v5"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -20,35 +23,38 @@ const (
 )
 
 type Reading struct {
-	Timestamp   time.Time
-	Temperature float64
-}
-
-type Storage struct {
-	data map[string][]Reading
-	mu   sync.RWMutex
+	Name        string    `db:"name"`
+	Timestamp   time.Time `db:"timestamp"`
+	Temperature float64   `db:"temperature"`
 }
 
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	ctx := context.Background()
 
-	storage := &Storage{
-		data: make(map[string][]Reading),
+	connStr := "postgresql://postgres:qwerty@localhost:8080/postgres"
+
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
+		os.Exit(1)
 	}
+	defer conn.Close(ctx)
 
 	r.Get("/{city}", func(w http.ResponseWriter, r *http.Request) {
 		cityName := chi.URLParam(r, "city")
 		fmt.Printf("received request for city: %s\n", cityName)
 
-		storage.mu.RLock()
-		defer storage.mu.RUnlock()
-
-		reading, ok := storage.data[cityName]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("not found"))
-			return
+		var reading Reading
+		err := conn.QueryRow(
+			ctx,
+			"SELECT name, timestamp, temperature FROM reading WHERE name = $1 ORDER BY timestamp DESC LIMIT 1",
+			city,
+		).Scan(&reading.Name, &reading.Timestamp, &reading.Temperature)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("internal error"))
 		}
 
 		row, err := json.Marshal(reading)
@@ -67,7 +73,7 @@ func main() {
 		panic(err)
 	}
 
-	jobs, err := initJobs(s, storage)
+	jobs, err := initJobs(ctx, s, conn)
 	if err != nil {
 		panic(err)
 	}
@@ -93,7 +99,7 @@ func main() {
 	wg.Wait()
 }
 
-func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error) {
+func initJobs(ctx context.Context, scheduler gocron.Scheduler, conn *pgx.Conn) ([]gocron.Job, error) {
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -103,7 +109,7 @@ func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error
 
 	j, err := scheduler.NewJob(
 		gocron.DurationJob(
-			10*time.Second,
+			1*time.Minute,
 		),
 		gocron.NewTask(
 			func() {
@@ -119,19 +125,21 @@ func initJobs(scheduler gocron.Scheduler, storage *Storage) ([]gocron.Job, error
 					return
 				}
 
-				storage.mu.Lock()
-				defer storage.mu.Unlock()
-
 				timestamp, err := time.Parse("2006-01-02T15:04", opMetResp.Current.Time)
 				if err != nil {
 					log.Println(err)
 					return
 				}
 
-				storage.data[city] = append(storage.data[city], Reading{
-					Timestamp:   timestamp,
-					Temperature: opMetResp.Current.Temperature2m,
-				})
+				_, err = conn.Exec(
+					ctx,
+					"INSERT INTO reading (name, timestamp, temperature) VALUES ($1, $2, $3)",
+					city, timestamp, opMetResp.Current.Temperature2m)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
 				fmt.Printf("%v updated data for city: %s\n", time.Now(), city)
 			},
 		),

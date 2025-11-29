@@ -1,0 +1,11 @@
+services:
+
+  db:
+    image: postgres:18.0
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: qwerty
+      POSTGRES_DB: weather
+    ports:
+      - "8080:5432"
