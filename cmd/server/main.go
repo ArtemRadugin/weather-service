@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/ArtemRadugin/weather-service/internal/client/http/geocoding"
 	"github.com/ArtemRadugin/weather-service/internal/client/http/open_meteo"
@@ -53,8 +54,11 @@ func main() {
 			city,
 		).Scan(&reading.Name, &reading.Timestamp, &reading.Temperature)
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("internal error"))
+			if errors.Is(err, pgx.ErrNoRows) {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("not found"))
+				return
+			}
 		}
 
 		row, err := json.Marshal(reading)
