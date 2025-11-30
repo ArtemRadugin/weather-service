@@ -1,0 +1,12 @@
+env: "local"
+
+port: 3030
+host: "localhost"
+
+db:
+  db_host: "localhost"
+  db_port: "8080"
+  db_password: "qwerty"
+  db_name: "weather"
+  ssl_mode: "disable"
+  username: "postgres"

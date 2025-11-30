@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ArtemRadugin/weather-service/internal/client/http/geocoding"
-	"github.com/ArtemRadugin/weather-service/internal/client/http/open_meteo"
+	"github.com/ArtemRadugin/weather-service/internal/clients"
+	"github.com/ArtemRadugin/weather-service/internal/clients/http/geocoding"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-co-op/gocron/v2"
@@ -109,7 +109,7 @@ func initJobs(ctx context.Context, scheduler gocron.Scheduler, conn *pgx.Conn) (
 	}
 
 	geocodingClient := geocoding.NewClient(httpClient)
-	openMeteoClient := open_meteo.NewClient(httpClient)
+	openMeteoClient := clients.NewClient(httpClient)
 
 	j, err := scheduler.NewJob(
 		gocron.DurationJob(
